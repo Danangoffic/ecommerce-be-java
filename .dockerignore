@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Build artifacts
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# Gradle (old build system)
+.gradle/
+build/
+bin/
+
+# Logs
+*.log
+
+# Test files
+src/test/
+*.test
+
+# Documentation
+README.md
+AGENTS.md
+PRD.md
+HELP.md
+!.mvn/wrapper/MavenWrapperDownloader.java
+
+# Docker
+Dockerfile
+docker-compose.yml
+.docker/
+
+# CI/CD
+.github/
+
+# Misc
+*.bak
+*.tmp
+.DS_Store

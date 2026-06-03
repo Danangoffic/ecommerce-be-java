@@ -1,0 +1,186 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  JAVA_VERSION: '17'
+  MAVEN_VERSION: '3.9'
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ecommerce_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Verify Maven configuration
+        run: mvn -v
+
+      - name: Build with Maven
+        run: mvn clean compile -DskipTests
+        env:
+          DB_URL: jdbc:mysql://localhost:3306/ecommerce_test
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          JWT_SECRET: test_jwt_secret_key_for_ci_pipeline_min_256_bits
+          RESEND_API_KEY: re_test
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          OAUTH2_FRONTEND_REDIRECT_URI: http://localhost:3000/oauth2/redirect
+          PRODUCT_IMAGES_DIR: /tmp/product-images
+
+      - name: Run tests
+        run: mvn test
+        env:
+          DB_URL: jdbc:mysql://localhost:3306/ecommerce_test
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          JWT_SECRET: test_jwt_secret_key_for_ci_pipeline_min_256_bits
+          RESEND_API_KEY: re_test
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          OAUTH2_FRONTEND_REDIRECT_URI: http://localhost:3000/oauth2/redirect
+          PRODUCT_IMAGES_DIR: /tmp/product-images
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: target/surefire-reports/*.xml
+
+      - name: Generate JAR
+        run: mvn package -DskipTests
+        env:
+          DB_URL: jdbc:mysql://localhost:3306/ecommerce_test
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          JWT_SECRET: test_jwt_secret_key_for_ci_pipeline_min_256_bits
+          RESEND_API_KEY: re_test
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          OAUTH2_FRONTEND_REDIRECT_URI: http://localhost:3000/oauth2/redirect
+          PRODUCT_IMAGES_DIR: /tmp/product-images
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecommerce-app
+          path: target/*.jar
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Run SpotBugs
+        run: mvn com.github.spotbugs:spotbugs-maven-plugin:4.8.3.0:check || true
+
+      - name: Run dependency-check
+        run: mvn org.owasp:dependency-check-maven:check || true
+        env:
+         dependency-check SuppressionFile: .github/dependency-check-suppressions.xml
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ecommerce-app
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [build, build-docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            cd /opt/ecommerce
+            docker-compose pull
+            docker-compose up -d
+            docker-compose exec -T app mvn spring-boot:run || echo "Using existing container"

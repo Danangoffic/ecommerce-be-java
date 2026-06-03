@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ecommerce-app:latest
+    container_name: ecommerce-app
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - DB_URL=jdbc:mysql://mysql:3306/ecommerce
+      - DB_USERNAME=root
+      - DB_PASSWORD=${DB_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - OAUTH2_FRONTEND_REDIRECT_URI=${OAUTH2_FRONTEND_REDIRECT_URI}
+      - PRODUCT_IMAGES_DIR=/app/product-images
+    volumes:
+      - product-images:/app/product-images
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  mysql:
+    image: mysql:8.0
+    container_name: ecommerce-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=ecommerce
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui
+    container_name: ecommerce-swagger
+    ports:
+      - "8081:8080"
+    environment:
+      - SWAGGER_JSON=/openapi.json
+    volumes:
+      - ./openapi.json:/openapi.json:ro
+    depends_on:
+      - app
+    networks:
+      - ecommerce-network
+
+volumes:
+  mysql-data:
+  product-images:
+
+networks:
+  ecommerce-network:
+    driver: bridge
