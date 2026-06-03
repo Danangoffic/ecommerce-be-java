@@ -15,6 +15,15 @@ import com.ecommerce.repository.CategoryRepository;
 import com.ecommerce.repository.OrderRepository;
 import com.ecommerce.repository.ProductRepository;
 import com.ecommerce.repository.UserRepository;
+import com.ecommerce.repository.WishlistRepository;
+import com.ecommerce.repository.ProductReviewRepository;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import java.util.Collections;
+import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +40,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -65,8 +75,22 @@ class EcommerceApplicationTests {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private WishlistRepository wishlistRepository;
+
+    @Autowired
+    private ProductReviewRepository productReviewRepository;
+
+    @Autowired
+    private com.ecommerce.security.OAuth2AuthenticationSuccessHandler oauth2AuthenticationSuccessHandler;
+
+    @Autowired
+    private com.ecommerce.security.JwtService jwtService;
+
     @BeforeEach
     void setUp() {
+        wishlistRepository.deleteAll();
+        productReviewRepository.deleteAll();
         orderRepository.deleteAll();
         cartRepository.deleteAll();
         productRepository.deleteAll();
@@ -236,5 +260,218 @@ class EcommerceApplicationTests {
 
     private String bearer(String token) {
         return "Bearer " + token;
+    }
+
+    @Test
+    void wishlistLifecycleWorks() throws Exception {
+        Category category = activeCategory("Electronics");
+        createProductAsAdmin(category.getId(), "Smart TV", "ACTIVE", 10, new BigDecimal("499.99"));
+        Long productId = productRepository.findAll().get(0).getId();
+
+        String token = registerAndGetToken("wishlister@example.com");
+
+        // 1. Check wishlist status (should be false)
+        mockMvc.perform(get("/api/v1/wishlist/products/" + productId + "/check")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.wishlisted").value(false));
+
+        // 2. Add to wishlist
+        mockMvc.perform(post("/api/v1/wishlist/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.product.name").value("Smart TV"));
+
+        // 3. Check again (should be true)
+        mockMvc.perform(get("/api/v1/wishlist/products/" + productId + "/check")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.wishlisted").value(true));
+
+        // 4. List wishlist
+        mockMvc.perform(get("/api/v1/wishlist")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].product.name").value("Smart TV"));
+
+        // 5. Remove from wishlist
+        mockMvc.perform(delete("/api/v1/wishlist/products/" + productId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        // 6. Check again (should be false)
+        mockMvc.perform(get("/api/v1/wishlist/products/" + productId + "/check")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.wishlisted").value(false));
+    }
+
+    @Test
+    void productReviewVerifiedPurchaseFlowWorks() throws Exception {
+        Category category = activeCategory("Books");
+        createProductAsAdmin(category.getId(), "Clean Architecture", "ACTIVE", 20, new BigDecimal("45.00"));
+        Long productId = productRepository.findAll().get(0).getId();
+
+        String token = registerAndGetToken("reviewer@example.com");
+
+        // 1. Try to review before purchase (should fail)
+        String reviewPayload = """
+                {
+                    "productId": %d,
+                    "rating": 5,
+                    "comment": "Must read for developers!"
+                }
+                """.formatted(productId);
+
+        mockMvc.perform(post("/api/v1/reviews")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("You can only review products you have purchased and completed the order"));
+
+        // 2. Buy product
+        mockMvc.perform(post("/api/v1/cart/items")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AddCartItemRequest(productId, 1))))
+                .andExpect(status().isOk());
+
+        String checkoutResponse = mockMvc.perform(post("/api/v1/checkout")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CheckoutRequest(
+                                "Bandung", "Reviewer User", "0812", "notes"
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        long orderId = objectMapper.readTree(checkoutResponse).path("data").path("orderId").asLong();
+
+        // 3. Try to review before order is completed (still processing/created, should fail)
+        mockMvc.perform(post("/api/v1/reviews")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewPayload))
+                .andExpect(status().isBadRequest());
+
+        // 4. Advance order status step-by-step as Admin: CREATED -> PROCESSING -> SHIPPED -> COMPLETED
+        String adminToken = loginAsAdmin();
+        mockMvc.perform(put("/api/v1/admin/orders/" + orderId + "/status")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateOrderStatusRequest("PROCESSING"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/v1/admin/orders/" + orderId + "/status")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateOrderStatusRequest("SHIPPED"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/v1/admin/orders/" + orderId + "/status")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateOrderStatusRequest("COMPLETED"))))
+                .andExpect(status().isOk());
+
+        // 5. Submit review (should succeed now!)
+        mockMvc.perform(post("/api/v1/reviews")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.rating").value(5))
+                .andExpect(jsonPath("$.data.comment").value("Must read for developers!"));
+
+        // 6. Try to submit duplicate review (should fail with conflict)
+        mockMvc.perform(post("/api/v1/reviews")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewPayload))
+                .andExpect(status().isConflict());
+
+        // 7. Verify review in product detail & list reviews
+        mockMvc.perform(get("/api/v1/products/" + productId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.averageRating").value(5.0))
+                .andExpect(jsonPath("$.data.reviewCount").value(1));
+
+        mockMvc.perform(get("/api/v1/products/" + productId + "/reviews"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].comment").value("Must read for developers!"));
+
+        // 8. Admin review search and delete
+        String adminReviewsResponse = mockMvc.perform(get("/api/v1/admin/reviews")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        long reviewId = objectMapper.readTree(adminReviewsResponse).path("data").path("content").get(0).path("id").asLong();
+
+        // Admin deletes review
+        mockMvc.perform(delete("/api/v1/admin/reviews/" + reviewId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminToken)))
+                .andExpect(status().isOk());
+
+        // Detail rating stats should reset to 0
+        mockMvc.perform(get("/api/v1/products/" + productId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.averageRating").value(0.0))
+                .andExpect(jsonPath("$.data.reviewCount").value(0));
+    }
+
+    @Test
+    void oauth2SuccessHandlerFlowWorks() throws Exception {
+        // 1. Create a mock OAuth2User principal
+        Map<String, Object> attributes = Map.of(
+                "sub", "google-oauth2-id-12345",
+                "name", "OAuth User",
+                "email", "oauthuser@example.com"
+        );
+        DefaultOAuth2User principal = new DefaultOAuth2User(
+                Collections.singleton(new SimpleGrantedAuthority("ROLE_USER")),
+                attributes,
+                "name"
+        );
+
+        // 2. Create the Authentication token
+        OAuth2AuthenticationToken authentication = new OAuth2AuthenticationToken(
+                principal,
+                Collections.singleton(new SimpleGrantedAuthority("ROLE_USER")),
+                "google"
+        );
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        // 3. Trigger success handler
+        oauth2AuthenticationSuccessHandler.onAuthenticationSuccess(request, response, authentication);
+
+        // 4. Assert redirection to frontend redirect URI with token query param
+        String redirectUrl = response.getRedirectedUrl();
+        assertThat(redirectUrl).startsWith("http://localhost:3000/oauth2/redirect?token=");
+
+        String token = redirectUrl.substring("http://localhost:3000/oauth2/redirect?token=".length());
+        assertThat(jwtService.extractUsername(token)).isEqualTo("oauthuser@example.com");
+
+        // 5. Verify user is registered in database
+        User user = userRepository.findByEmailIgnoreCase("oauthuser@example.com").orElse(null);
+        assertThat(user).isNotNull();
+        assertThat(user.getName()).isEqualTo("OAuth User");
+        assertThat(user.getProvider()).isEqualTo("google");
+        assertThat(user.getProviderId()).isEqualTo("google-oauth2-id-12345");
+        assertThat(user.getRole()).isEqualTo(Role.CUSTOMER);
     }
 }

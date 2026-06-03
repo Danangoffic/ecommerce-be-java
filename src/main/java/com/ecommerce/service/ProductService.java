@@ -8,6 +8,7 @@ import com.ecommerce.dto.response.ProductImportResultResponse;
 import com.ecommerce.dto.response.PageResponse;
 import com.ecommerce.dto.response.ProductResponse;
 import com.ecommerce.dto.response.WarehouseResponse;
+import com.ecommerce.dto.response.ReviewStats;
 import com.ecommerce.entity.Category;
 import com.ecommerce.entity.Product;
 import com.ecommerce.entity.Warehouse;
@@ -15,6 +16,7 @@ import com.ecommerce.entity.enums.ProductStatus;
 import com.ecommerce.exception.BadRequestException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.ProductRepository;
+import com.ecommerce.repository.ProductReviewRepository;
 import com.ecommerce.util.PageUtils;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
@@ -52,25 +54,24 @@ public class ProductService {
     private final WarehouseService warehouseService;
     private final FileStorageService fileStorageService;
     private final PageUtils pageUtils;
+    private final ProductReviewRepository productReviewRepository;
 
     public PageResponse<ProductResponse> listPublic(Long categoryId, String keyword, Integer page, Integer size, String sort) {
-        Page<ProductResponse> result = productRepository.search(
+        Page<Product> result = productRepository.search(
                         true,
                         categoryId,
                         blankToNull(keyword),
-                        pageUtils.pageable(page, size, resolveSort(sort)))
-                .map(this::toResponse);
-        return PageResponse.from(result);
+                        pageUtils.pageable(page, size, resolveSort(sort)));
+        return mapPageWithStats(result);
     }
 
     public PageResponse<ProductResponse> listAdmin(Long categoryId, String keyword, Integer page, Integer size, String sort) {
-        Page<ProductResponse> result = productRepository.search(
+        Page<Product> result = productRepository.search(
                         false,
                         categoryId,
                         blankToNull(keyword),
-                        pageUtils.pageable(page, size, resolveSort(sort)))
-                .map(this::toResponse);
-        return PageResponse.from(result);
+                        pageUtils.pageable(page, size, resolveSort(sort)));
+        return mapPageWithStats(result);
     }
 
     public ProductResponse getPublicDetail(Long id) {
@@ -238,7 +239,12 @@ public class ProductService {
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
     }
 
-    private ProductResponse toResponse(Product product) {
+    public ProductResponse toResponse(Product product) {
+        ReviewStats stats = productReviewRepository.getStatsForProduct(product.getId());
+        return toResponse(product, stats.averageRating(), stats.reviewCount());
+    }
+
+    public ProductResponse toResponse(Product product, Double averageRating, Long reviewCount) {
         return new ProductResponse(
                 product.getId(),
                 product.getName(),
@@ -257,8 +263,29 @@ public class ProductService {
                         product.getCategory().getStatus().name()
                 ),
                 toWarehouseResponse(product.getWarehouse()),
+                averageRating,
+                reviewCount,
                 product.getCreatedAt()
         );
+    }
+
+    private PageResponse<ProductResponse> mapPageWithStats(Page<Product> productPage) {
+        List<Long> productIds = productPage.getContent().stream().map(Product::getId).toList();
+        Map<Long, ReviewStats> statsMap = new HashMap<>();
+        if (!productIds.isEmpty()) {
+            List<Object[]> statsList = productReviewRepository.findStatsForProductIds(productIds);
+            for (Object[] row : statsList) {
+                Long prodId = (Long) row[0];
+                Double avgRating = (Double) row[1];
+                Long revCount = (Long) row[2];
+                statsMap.put(prodId, new ReviewStats(avgRating, revCount));
+            }
+        }
+        Page<ProductResponse> responsePage = productPage.map(product -> {
+            ReviewStats stats = statsMap.getOrDefault(product.getId(), new ReviewStats(0.0, 0L));
+            return toResponse(product, stats.averageRating(), stats.reviewCount());
+        });
+        return PageResponse.from(responsePage);
     }
 
     private Sort resolveSort(String sort) {

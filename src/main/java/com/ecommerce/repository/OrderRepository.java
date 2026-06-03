@@ -57,4 +57,14 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     BigDecimal sumValidSales();
 
     List<Order> findTop5ByOrderByCreatedAtDesc();
+
+    @Query("""
+            select count(o) > 0
+            from Order o
+            join o.items oi
+            where o.user.id = :userId
+              and oi.productId = :productId
+              and o.status = com.ecommerce.entity.enums.OrderStatus.COMPLETED
+            """)
+    boolean hasCompletedOrderWithProduct(@Param("userId") Long userId, @Param("productId") Long productId);
 }

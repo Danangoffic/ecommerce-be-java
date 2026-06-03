@@ -35,6 +35,7 @@ public class SecurityConfig {
     private final AppUserDetailsService userDetailsService;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepository;
+    private final OAuth2AuthenticationSuccessHandler oauth2AuthenticationSuccessHandler;
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -71,7 +72,7 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         if (clientRegistrationRepository.getIfAvailable() != null) {
-            http.oauth2Login(oauth2 -> oauth2.defaultSuccessUrl("/api/v1/auth/oauth2/success"));
+            http.oauth2Login(oauth2 -> oauth2.successHandler(oauth2AuthenticationSuccessHandler));
         }
 
         return http.build();

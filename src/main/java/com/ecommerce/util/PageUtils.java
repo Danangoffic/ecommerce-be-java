@@ -18,6 +18,7 @@ public class PageUtils {
         int resolvedSize = size == null || size < 1
                 ? properties.getPagination().getDefaultPageSize()
                 : Math.min(size, properties.getPagination().getMaxPageSize());
-        return PageRequest.of(resolvedPage, resolvedSize, sort);
+        Sort resolvedSort = sort == null ? Sort.unsorted() : sort;
+        return PageRequest.of(resolvedPage, resolvedSize, resolvedSort);
     }
 }

@@ -16,6 +16,8 @@ public record ProductResponse(
         String status,
         CategoryResponse category,
         WarehouseResponse warehouse,
+        Double averageRating,
+        Long reviewCount,
         Instant createdAt
 ) {
 }
