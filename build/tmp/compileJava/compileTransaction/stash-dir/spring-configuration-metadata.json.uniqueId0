@@ -1,0 +1,47 @@
+{
+  "groups": [
+    {
+      "name": "app",
+      "type": "com.ecommerce.config.ApplicationProperties",
+      "sourceType": "com.ecommerce.config.ApplicationProperties"
+    },
+    {
+      "name": "app.jwt",
+      "type": "com.ecommerce.config.ApplicationProperties$Jwt",
+      "sourceType": "com.ecommerce.config.ApplicationProperties",
+      "sourceMethod": "getJwt()"
+    },
+    {
+      "name": "app.pagination",
+      "type": "com.ecommerce.config.ApplicationProperties$Pagination",
+      "sourceType": "com.ecommerce.config.ApplicationProperties",
+      "sourceMethod": "getPagination()"
+    }
+  ],
+  "properties": [
+    {
+      "name": "app.jwt.access-token-expiration",
+      "type": "java.time.Duration",
+      "sourceType": "com.ecommerce.config.ApplicationProperties$Jwt",
+      "defaultValue": "2h"
+    },
+    {
+      "name": "app.jwt.secret",
+      "type": "java.lang.String",
+      "sourceType": "com.ecommerce.config.ApplicationProperties$Jwt"
+    },
+    {
+      "name": "app.pagination.default-page-size",
+      "type": "java.lang.Integer",
+      "sourceType": "com.ecommerce.config.ApplicationProperties$Pagination",
+      "defaultValue": 10
+    },
+    {
+      "name": "app.pagination.max-page-size",
+      "type": "java.lang.Integer",
+      "sourceType": "com.ecommerce.config.ApplicationProperties$Pagination",
+      "defaultValue": 100
+    }
+  ],
+  "hints": []
+}

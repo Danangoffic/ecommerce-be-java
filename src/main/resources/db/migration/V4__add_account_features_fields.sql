@@ -1,0 +1,4 @@
+ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN verification_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN password_reset_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN token_expiry TIMESTAMP NULL;
