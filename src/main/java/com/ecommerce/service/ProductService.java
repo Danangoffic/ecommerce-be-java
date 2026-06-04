@@ -17,6 +17,7 @@ import com.ecommerce.exception.BadRequestException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.ProductRepository;
 import com.ecommerce.repository.ProductReviewRepository;
+import com.ecommerce.repository.WishlistRepository;
 import com.ecommerce.util.PageUtils;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
@@ -55,14 +56,19 @@ public class ProductService {
     private final FileStorageService fileStorageService;
     private final PageUtils pageUtils;
     private final ProductReviewRepository productReviewRepository;
+    private final WishlistRepository wishlistRepository;
 
     public PageResponse<ProductResponse> listPublic(Long categoryId, String keyword, Integer page, Integer size, String sort) {
+        return listPublic(categoryId, keyword, page, size, sort, null);
+    }
+
+    public PageResponse<ProductResponse> listPublic(Long categoryId, String keyword, Integer page, Integer size, String sort, Long userId) {
         Page<Product> result = productRepository.search(
                         true,
                         categoryId,
                         blankToNull(keyword),
                         pageUtils.pageable(page, size, resolveSort(sort)));
-        return mapPageWithStats(result);
+        return mapPageWithStats(result, userId);
     }
 
     public PageResponse<ProductResponse> listAdmin(Long categoryId, String keyword, Integer page, Integer size, String sort) {
@@ -71,15 +77,19 @@ public class ProductService {
                         categoryId,
                         blankToNull(keyword),
                         pageUtils.pageable(page, size, resolveSort(sort)));
-        return mapPageWithStats(result);
+        return mapPageWithStats(result, null);
     }
 
     public ProductResponse getPublicDetail(Long id) {
+        return getPublicDetail(id, null);
+    }
+
+    public ProductResponse getPublicDetail(Long id, Long userId) {
         Product product = getProduct(id);
         if (product.getStatus() != ProductStatus.ACTIVE) {
             throw new ResourceNotFoundException("Product not found");
         }
-        return toResponse(product);
+        return toResponse(product, userId);
     }
 
     public Product getManagedProduct(Long id) {
@@ -240,11 +250,20 @@ public class ProductService {
     }
 
     public ProductResponse toResponse(Product product) {
+        return toResponse(product, null);
+    }
+
+    public ProductResponse toResponse(Product product, Long userId) {
         ReviewStats stats = productReviewRepository.getStatsForProduct(product.getId());
-        return toResponse(product, stats.averageRating(), stats.reviewCount());
+        boolean isInWishlist = userId != null && wishlistRepository.existsByUserIdAndProductId(userId, product.getId());
+        return toResponse(product, stats.averageRating(), stats.reviewCount(), isInWishlist);
     }
 
     public ProductResponse toResponse(Product product, Double averageRating, Long reviewCount) {
+        return toResponse(product, averageRating, reviewCount, false);
+    }
+
+    public ProductResponse toResponse(Product product, Double averageRating, Long reviewCount, boolean isInWishlist) {
         return new ProductResponse(
                 product.getId(),
                 product.getName(),
@@ -265,13 +284,19 @@ public class ProductService {
                 toWarehouseResponse(product.getWarehouse()),
                 averageRating,
                 reviewCount,
+                isInWishlist,
                 product.getCreatedAt()
         );
     }
 
     private PageResponse<ProductResponse> mapPageWithStats(Page<Product> productPage) {
+        return mapPageWithStats(productPage, null);
+    }
+
+    private PageResponse<ProductResponse> mapPageWithStats(Page<Product> productPage, Long userId) {
         List<Long> productIds = productPage.getContent().stream().map(Product::getId).toList();
         Map<Long, ReviewStats> statsMap = new HashMap<>();
+        Map<Long, Boolean> wishlistMap = new HashMap<>();
         if (!productIds.isEmpty()) {
             List<Object[]> statsList = productReviewRepository.findStatsForProductIds(productIds);
             for (Object[] row : statsList) {
@@ -280,10 +305,17 @@ public class ProductService {
                 Long revCount = (Long) row[2];
                 statsMap.put(prodId, new ReviewStats(avgRating, revCount));
             }
+            if (userId != null) {
+                List<Long> wishlistedIds = wishlistRepository.findProductIdsByUserIdAndProductIds(userId, productIds);
+                for (Long prodId : productIds) {
+                    wishlistMap.put(prodId, wishlistedIds.contains(prodId));
+                }
+            }
         }
         Page<ProductResponse> responsePage = productPage.map(product -> {
             ReviewStats stats = statsMap.getOrDefault(product.getId(), new ReviewStats(0.0, 0L));
-            return toResponse(product, stats.averageRating(), stats.reviewCount());
+            boolean isInWishlist = wishlistMap.getOrDefault(product.getId(), false);
+            return toResponse(product, stats.averageRating(), stats.reviewCount(), isInWishlist);
         });
         return PageResponse.from(responsePage);
     }

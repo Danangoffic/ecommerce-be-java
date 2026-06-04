@@ -18,6 +18,7 @@ public record ProductResponse(
         WarehouseResponse warehouse,
         Double averageRating,
         Long reviewCount,
+        boolean isInWishlist,
         Instant createdAt
 ) {
 }

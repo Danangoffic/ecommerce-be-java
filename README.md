@@ -58,10 +58,12 @@ http://localhost:8080/api/v1
 ### Products
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/products` | List products (customer) |
-| GET | `/products/search` | Search products |
-| GET | `/products/{id}` | Product detail |
+| GET | `/products` | List products (customer) - includes `isInWishlist` field for authenticated users |
+| GET | `/products/search` | Search products - includes `isInWishlist` field for authenticated users |
+| GET | `/products/{id}` | Product detail - includes `isInWishlist` field for authenticated users |
 | GET | `/products/{productId}/reviews` | Product reviews |
+
+**Note**: Product endpoints now return `isInWishlist` boolean field. For authenticated users, this indicates if the product is in their wishlist. For unauthenticated users, this field will always be `false`.
 
 ### Categories
 | Method | Endpoint | Description |

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
@@ -19,6 +20,12 @@ public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
             where w.user.id = :userId
             """)
     Page<Wishlist> findDetailedByUserId(@Param("userId") Long userId, Pageable pageable);
+
+    @Query("""
+            select w.product.id from Wishlist w
+            where w.user.id = :userId and w.product.id in :productIds
+            """)
+    List<Long> findProductIdsByUserIdAndProductIds(@Param("userId") Long userId, @Param("productIds") List<Long> productIds);
 
     boolean existsByUserIdAndProductId(Long userId, Long productId);
 
