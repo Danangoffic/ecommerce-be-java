@@ -17,4 +17,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByVerificationToken(String token);
 
     long countByRole(com.ecommerce.entity.enums.Role role);
+
+    Optional<User> findByRefreshToken(String refreshToken);
 }

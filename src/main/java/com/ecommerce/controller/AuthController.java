@@ -2,6 +2,7 @@ package com.ecommerce.controller;
 
 import com.ecommerce.dto.request.ForgotPasswordRequest;
 import com.ecommerce.dto.request.LoginRequest;
+import com.ecommerce.dto.request.RefreshTokenRequest;
 import com.ecommerce.dto.request.RegisterRequest;
 import com.ecommerce.dto.request.ResetPasswordRequest;
 import com.ecommerce.dto.response.ApiResponse;
@@ -68,5 +69,10 @@ public class AuthController {
     @GetMapping("/me")
     public ApiResponse<UserProfileResponse> me(@AuthenticationPrincipal AuthenticatedUser user) {
         return ApiResponse.success("Current user fetched", authService.currentUser(user.getId()));
+    }
+
+    @PostMapping("/refresh")
+    public ApiResponse<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return ApiResponse.success("Token refreshed", authService.refresh(request.refreshToken()));
     }
 }

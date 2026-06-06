@@ -55,4 +55,10 @@ public class User extends BaseEntity {
 
     @Column(name = "token_expiry")
     private Instant tokenExpiry;
+
+    @Column(name = "refresh_token", length = 255)
+    private String refreshToken;
+
+    @Column(name = "refresh_token_expiry")
+    private Instant refreshTokenExpiry;
 }

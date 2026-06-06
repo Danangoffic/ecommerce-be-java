@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 
 @Service
 public class JwtService {
@@ -34,6 +35,18 @@ public class JwtService {
                 .expiration(Date.from(expiration))
                 .signWith(secretKey)
                 .compact();
+    }
+
+    public String generateRefreshToken() {
+        return UUID.randomUUID().toString();
+    }
+
+    public Instant refreshTokenExpiresAt() {
+        return Instant.now().plus(properties.getJwt().getRefreshTokenExpiration());
+    }
+
+    public boolean isRefreshTokenExpired(Instant expiry) {
+        return expiry == null || Instant.now().isAfter(expiry);
     }
 
     public String extractUsername(String token) {

@@ -25,6 +25,7 @@ public class ApplicationProperties {
 
         private String secret;
         private Duration accessTokenExpiration = Duration.ofHours(2);
+        private Duration refreshTokenExpiration = Duration.ofDays(30);
     }
 
     @Getter

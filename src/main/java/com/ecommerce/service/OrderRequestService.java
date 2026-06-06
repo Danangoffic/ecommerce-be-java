@@ -31,8 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -131,16 +135,16 @@ public class OrderRequestService {
         List<Long> productIds = order.getItems().stream().map(OrderItem::getProductId).toList();
         List<Product> lockedProducts = productRepository.findAllByIdForUpdate(productIds);
         Map<Long, Product> productMap = lockedProducts.stream()
-                .collect(java.util.stream.Collectors.toMap(Product::getId, p -> p));
+                .collect(Collectors.toMap(Product::getId, p -> p));
 
         List<Long> variantIds = order.getItems().stream()
                 .map(OrderItem::getVariantId)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .toList();
         Map<Long, ProductVariant> variantMap = variantIds.isEmpty()
-                ? java.util.Collections.emptyMap()
+                ? Collections.emptyMap()
                 : productVariantRepository.findAllByIdForUpdate(variantIds).stream()
-                        .collect(java.util.stream.Collectors.toMap(ProductVariant::getId, v -> v));
+                        .collect(Collectors.toMap(ProductVariant::getId, v -> v));
 
         for (OrderItem item : order.getItems()) {
             Product product = productMap.get(item.getProductId());
