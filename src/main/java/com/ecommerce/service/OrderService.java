@@ -5,10 +5,14 @@ import com.ecommerce.dto.response.OrderItemResponse;
 import com.ecommerce.dto.response.OrderResponse;
 import com.ecommerce.dto.response.PageResponse;
 import com.ecommerce.entity.Order;
+import com.ecommerce.entity.OrderItem;
+import com.ecommerce.entity.ProductVariant;
 import com.ecommerce.entity.enums.OrderStatus;
 import com.ecommerce.exception.InvalidOrderStatusException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.OrderRepository;
+import com.ecommerce.repository.ProductRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.util.PageUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -16,15 +20,21 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class OrderService {
 
     private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
+    private final ProductVariantRepository productVariantRepository;
     private final PageUtils pageUtils;
 
     private static final Map<OrderStatus, EnumSet<OrderStatus>> ALLOWED_TRANSITIONS = new EnumMap<>(OrderStatus.class);
@@ -72,14 +82,39 @@ public class OrderService {
 
     @Transactional
     public OrderResponse updateStatus(Long orderId, UpdateOrderStatusRequest request) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findDetailedById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
         OrderStatus nextStatus = OrderStatus.valueOf(request.status().toUpperCase());
         if (!ALLOWED_TRANSITIONS.get(order.getStatus()).contains(nextStatus)) {
             throw new InvalidOrderStatusException("Invalid order status transition");
         }
+        if (nextStatus == OrderStatus.CANCELLED) {
+            rollbackStock(order);
+        }
         order.setStatus(nextStatus);
         return toResponseSummary(orderRepository.save(order));
+    }
+
+    private void rollbackStock(Order order) {
+        List<Long> productIds = order.getItems().stream().map(OrderItem::getProductId).toList();
+        Map<Long, com.ecommerce.entity.Product> productMap = productRepository.findAllByIdForUpdate(productIds)
+                .stream().collect(Collectors.toMap(com.ecommerce.entity.Product::getId, p -> p));
+
+        List<Long> variantIds = order.getItems().stream()
+                .map(OrderItem::getVariantId).filter(Objects::nonNull).toList();
+        Map<Long, ProductVariant> variantMap = variantIds.isEmpty() ? Collections.emptyMap()
+                : productVariantRepository.findAllByIdForUpdate(variantIds).stream()
+                        .collect(Collectors.toMap(ProductVariant::getId, v -> v));
+
+        for (OrderItem item : order.getItems()) {
+            com.ecommerce.entity.Product product = productMap.get(item.getProductId());
+            if (product == null) continue;
+            if (item.getVariantId() != null) {
+                ProductVariant variant = variantMap.get(item.getVariantId());
+                if (variant != null) variant.setStock(variant.getStock() + item.getQuantity());
+            }
+            product.setStock(product.getStock() + item.getQuantity());
+        }
     }
 
     OrderResponse toResponseDetail(Order order) {

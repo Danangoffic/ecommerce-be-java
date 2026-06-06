@@ -8,6 +8,7 @@ import com.ecommerce.entity.Order;
 import com.ecommerce.entity.OrderItem;
 import com.ecommerce.entity.OrderRequest;
 import com.ecommerce.entity.Product;
+import com.ecommerce.entity.ProductVariant;
 import com.ecommerce.entity.User;
 import com.ecommerce.entity.enums.OrderRequestStatus;
 import com.ecommerce.entity.enums.OrderRequestType;
@@ -19,6 +20,7 @@ import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.OrderRepository;
 import com.ecommerce.repository.OrderRequestRepository;
 import com.ecommerce.repository.ProductRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.repository.UserRepository;
 import com.ecommerce.util.PageUtils;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +44,7 @@ public class OrderRequestService {
     private final OrderRequestRepository orderRequestRepository;
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
+    private final ProductVariantRepository productVariantRepository;
     private final UserRepository userRepository;
     private final PageUtils pageUtils;
 
@@ -124,15 +127,33 @@ public class OrderRequestService {
             throw new BadRequestException("Order can no longer be cancelled");
         }
         order.setStatus(OrderStatus.CANCELLED);
+
         List<Long> productIds = order.getItems().stream().map(OrderItem::getProductId).toList();
         List<Product> lockedProducts = productRepository.findAllByIdForUpdate(productIds);
+        Map<Long, Product> productMap = lockedProducts.stream()
+                .collect(java.util.stream.Collectors.toMap(Product::getId, p -> p));
+
+        List<Long> variantIds = order.getItems().stream()
+                .map(OrderItem::getVariantId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Map<Long, ProductVariant> variantMap = variantIds.isEmpty()
+                ? java.util.Collections.emptyMap()
+                : productVariantRepository.findAllByIdForUpdate(variantIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(ProductVariant::getId, v -> v));
+
         for (OrderItem item : order.getItems()) {
-            Product product = lockedProducts.stream()
-                    .filter(candidate -> candidate.getId().equals(item.getProductId()))
-                    .findFirst()
-                    .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+            Product product = productMap.get(item.getProductId());
+            if (product == null) continue;
+            if (item.getVariantId() != null) {
+                ProductVariant variant = variantMap.get(item.getVariantId());
+                if (variant != null) {
+                    variant.setStock(variant.getStock() + item.getQuantity());
+                }
+            }
             product.setStock(product.getStock() + item.getQuantity());
         }
+
         orderRepository.save(order);
     }
 

@@ -1,14 +1,20 @@
 package com.ecommerce.service;
 
+import com.ecommerce.dto.request.UpdateOrderStatusRequest;
 import com.ecommerce.dto.response.OrderResponse;
 import com.ecommerce.dto.response.PageResponse;
 import com.ecommerce.entity.Order;
+import com.ecommerce.entity.OrderItem;
+import com.ecommerce.entity.Product;
 import com.ecommerce.entity.User;
 import com.ecommerce.entity.enums.OrderStatus;
 import com.ecommerce.entity.enums.Role;
 import com.ecommerce.entity.enums.UserStatus;
+import com.ecommerce.exception.InvalidOrderStatusException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.OrderRepository;
+import com.ecommerce.repository.ProductRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.util.PageUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,11 +29,15 @@ import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +48,12 @@ class OrderServiceTest {
     private OrderRepository orderRepository;
 
     @Mock
+    private ProductRepository productRepository;
+
+    @Mock
+    private ProductVariantRepository productVariantRepository;
+
+    @Mock
     private PageUtils pageUtils;
 
     @InjectMocks
@@ -45,6 +61,8 @@ class OrderServiceTest {
 
     private User testUser;
     private Order testOrder;
+    private Product testProduct;
+    private OrderItem testOrderItem;
     private PageRequest pageRequest;
 
     @BeforeEach
@@ -56,6 +74,18 @@ class OrderServiceTest {
         testUser.setRole(Role.CUSTOMER);
         testUser.setStatus(UserStatus.ACTIVE);
 
+        testProduct = new Product();
+        testProduct.setId(10L);
+        testProduct.setStock(5);
+
+        testOrderItem = new OrderItem();
+        testOrderItem.setId(1L);
+        testOrderItem.setProductId(10L);
+        testOrderItem.setProductName("Smart TV");
+        testOrderItem.setQuantity(2);
+        testOrderItem.setPrice(new BigDecimal("500.00"));
+        testOrderItem.setSubtotal(new BigDecimal("1000.00"));
+
         testOrder = new Order();
         testOrder.setId(1L);
         testOrder.setUser(testUser);
@@ -66,7 +96,7 @@ class OrderServiceTest {
         testOrder.setTotalAmount(new BigDecimal("1000.00"));
         testOrder.setStatus(OrderStatus.CREATED);
         testOrder.setCreatedAt(Instant.now());
-        testOrder.setItems(List.of());
+        testOrder.setItems(new ArrayList<>(List.of(testOrderItem)));
 
         pageRequest = PageRequest.of(0, 10, Sort.by("createdAt").descending());
     }
@@ -255,5 +285,45 @@ class OrderServiceTest {
         // Assert
         assertThat(response).isNotNull();
         assertThat(response.content()).hasSize(1);
+    }
+
+    @Test
+    void updateStatusToCancelledRollsBackStock() {
+        // Arrange
+        when(orderRepository.findDetailedById(1L)).thenReturn(Optional.of(testOrder));
+        when(productRepository.findAllByIdForUpdate(List.of(10L))).thenReturn(List.of(testProduct));
+        when(orderRepository.save(any(Order.class))).thenReturn(testOrder);
+
+        // Act
+        orderService.updateStatus(1L, new UpdateOrderStatusRequest("CANCELLED"));
+
+        // Assert — stok dikembalikan sebesar quantity item (2)
+        assertThat(testProduct.getStock()).isEqualTo(7);
+        verify(orderRepository).save(testOrder);
+    }
+
+    @Test
+    void updateStatusToProcessingDoesNotRollbackStock() {
+        // Arrange
+        when(orderRepository.findDetailedById(1L)).thenReturn(Optional.of(testOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(testOrder);
+
+        // Act
+        orderService.updateStatus(1L, new UpdateOrderStatusRequest("PROCESSING"));
+
+        // Assert — stok tidak disentuh
+        assertThat(testProduct.getStock()).isEqualTo(5);
+        verify(productRepository, never()).findAllByIdForUpdate(anyList());
+    }
+
+    @Test
+    void updateStatusThrowsExceptionOnInvalidTransition() {
+        // Arrange — SHIPPED tidak bisa ke CANCELLED
+        testOrder.setStatus(OrderStatus.SHIPPED);
+        when(orderRepository.findDetailedById(1L)).thenReturn(Optional.of(testOrder));
+
+        // Act & Assert
+        assertThatThrownBy(() -> orderService.updateStatus(1L, new UpdateOrderStatusRequest("CANCELLED")))
+                .isInstanceOf(InvalidOrderStatusException.class);
     }
 }
