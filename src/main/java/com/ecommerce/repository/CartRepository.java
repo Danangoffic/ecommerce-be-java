@@ -17,6 +17,7 @@ public interface CartRepository extends JpaRepository<Cart, Long> {
             left join fetch c.items i
             left join fetch i.product p
             left join fetch p.category
+            left join fetch i.variant v
             where c.user.id = :userId and c.status = :status
             """)
     Optional<Cart> findDetailedByUserIdAndStatus(@Param("userId") Long userId, @Param("status") CartStatus status);

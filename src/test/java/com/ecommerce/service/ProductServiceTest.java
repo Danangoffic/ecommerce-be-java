@@ -6,8 +6,10 @@ import com.ecommerce.entity.Category;
 import com.ecommerce.entity.Product;
 import com.ecommerce.entity.enums.CategoryStatus;
 import com.ecommerce.entity.enums.ProductStatus;
+import com.ecommerce.repository.ProductImageRepository;
 import com.ecommerce.repository.ProductRepository;
 import com.ecommerce.repository.ProductReviewRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.repository.WishlistRepository;
 import com.ecommerce.util.PageUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,12 @@ class ProductServiceTest {
 
     @Mock
     private PageUtils pageUtils;
+
+    @Mock
+    private ProductImageRepository productImageRepository;
+
+    @Mock
+    private ProductVariantRepository productVariantRepository;
 
     @InjectMocks
     private ProductService productService;

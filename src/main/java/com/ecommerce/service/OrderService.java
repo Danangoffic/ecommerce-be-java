@@ -98,6 +98,9 @@ public class OrderService {
                                 item.getId(),
                                 item.getProductId(),
                                 item.getProductName(),
+                                item.getVariantId(),
+                                item.getVariantSku(),
+                                item.getVariantLabel(),
                                 item.getPrice(),
                                 item.getQuantity(),
                                 item.getSubtotal()))

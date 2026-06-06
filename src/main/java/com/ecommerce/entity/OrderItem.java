@@ -24,6 +24,15 @@ public class OrderItem extends BaseEntity {
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
+    @Column(name = "variant_id")
+    private Long variantId;
+
+    @Column(name = "variant_sku", length = 80)
+    private String variantSku;
+
+    @Column(name = "variant_label", length = 120)
+    private String variantLabel;
+
     @Column(name = "product_name", nullable = false, length = 150)
     private String productName;
 

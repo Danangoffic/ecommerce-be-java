@@ -92,7 +92,7 @@ class WishlistServiceTest {
         
         var mockProductResponse = new com.ecommerce.dto.response.ProductResponse(
                 1L, "Smart TV", "Test", new BigDecimal("499.99"), 10, 5, true, false, 
-                null, "ACTIVE", null, null, 0.0, 0L, false, null
+                null, "ACTIVE", null, null, 0.0, 0L, false, false, null, null, null
         );
         when(productService.toResponse(testProduct)).thenReturn(mockProductResponse);
 
@@ -175,7 +175,7 @@ class WishlistServiceTest {
         
         var mockProductResponse = new com.ecommerce.dto.response.ProductResponse(
                 1L, "Smart TV", "Test", new BigDecimal("499.99"), 10, 5, true, false, 
-                null, "ACTIVE", null, null, 0.0, 0L, false, null
+                null, "ACTIVE", null, null, 0.0, 0L, false, false, null, null, null
         );
         when(productService.toResponse(testProduct)).thenReturn(mockProductResponse);
 
@@ -246,7 +246,7 @@ class WishlistServiceTest {
         
         var mockProductResponse = new com.ecommerce.dto.response.ProductResponse(
                 1L, "Smart TV", "Test", new BigDecimal("499.99"), 10, 5, true, false, 
-                null, "ACTIVE", null, null, 0.0, 0L, false, null
+                null, "ACTIVE", null, null, 0.0, 0L, false, false, null, null, null
         );
         when(productService.toResponse(testProduct)).thenReturn(mockProductResponse);
 

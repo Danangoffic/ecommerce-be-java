@@ -4,19 +4,25 @@ import com.ecommerce.dto.request.ProductUpsertRequest;
 import com.ecommerce.dto.request.UpdateProductStatusRequest;
 import com.ecommerce.dto.request.UpdateProductStockRequest;
 import com.ecommerce.dto.response.CategoryResponse;
+import com.ecommerce.dto.response.ProductImageResponse;
 import com.ecommerce.dto.response.ProductImportResultResponse;
 import com.ecommerce.dto.response.PageResponse;
 import com.ecommerce.dto.response.ProductResponse;
+import com.ecommerce.dto.response.ProductVariantResponse;
 import com.ecommerce.dto.response.WarehouseResponse;
 import com.ecommerce.dto.response.ReviewStats;
 import com.ecommerce.entity.Category;
 import com.ecommerce.entity.Product;
+import com.ecommerce.entity.ProductImage;
+import com.ecommerce.entity.ProductVariant;
 import com.ecommerce.entity.Warehouse;
 import com.ecommerce.entity.enums.ProductStatus;
 import com.ecommerce.exception.BadRequestException;
 import com.ecommerce.exception.ResourceNotFoundException;
+import com.ecommerce.repository.ProductImageRepository;
 import com.ecommerce.repository.ProductRepository;
 import com.ecommerce.repository.ProductReviewRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.repository.WishlistRepository;
 import com.ecommerce.util.PageUtils;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +63,8 @@ public class ProductService {
     private final PageUtils pageUtils;
     private final ProductReviewRepository productReviewRepository;
     private final WishlistRepository wishlistRepository;
+    private final ProductImageRepository productImageRepository;
+    private final ProductVariantRepository productVariantRepository;
 
     public PageResponse<ProductResponse> listPublic(Long categoryId, String keyword, Integer page, Integer size, String sort) {
         return listPublic(categoryId, keyword, page, size, sort, null);
@@ -229,7 +237,14 @@ public class ProductService {
         product.setName(request.name());
         product.setDescription(request.description());
         product.setPrice(request.price());
-        product.setStock(request.stock());
+        // For products that already have variants, stock is an aggregate of the
+        // variant stock and is maintained by ProductVariantService, so the manual
+        // stock value from the request is ignored here.
+        boolean hasVariants = updating && product.getId() != null
+                && productVariantRepository.countByProductId(product.getId()) > 0;
+        if (!hasVariants) {
+            product.setStock(request.stock());
+        }
         product.setImageUrl(request.imageUrl());
         product.setStatus(parseStatus(request.status()));
         if (request.minimumStockLevel() != null) {
@@ -264,6 +279,17 @@ public class ProductService {
     }
 
     public ProductResponse toResponse(Product product, Double averageRating, Long reviewCount, boolean isInWishlist) {
+        List<ProductImage> images = productImageRepository.findByProductIdOrderBySortOrderAscIdAsc(product.getId());
+        List<ProductVariant> variants = productVariantRepository.findByProductIdOrderByIdAsc(product.getId());
+        return buildResponse(product, averageRating, reviewCount, isInWishlist, images, variants);
+    }
+
+    private ProductResponse buildResponse(Product product,
+                                          Double averageRating,
+                                          Long reviewCount,
+                                          boolean isInWishlist,
+                                          List<ProductImage> images,
+                                          List<ProductVariant> variants) {
         return new ProductResponse(
                 product.getId(),
                 product.getName(),
@@ -285,7 +311,33 @@ public class ProductService {
                 averageRating,
                 reviewCount,
                 isInWishlist,
+                !variants.isEmpty(),
+                images.stream().map(this::toImageResponse).toList(),
+                variants.stream().map(this::toVariantResponse).toList(),
                 product.getCreatedAt()
+        );
+    }
+
+    private ProductImageResponse toImageResponse(ProductImage image) {
+        return new ProductImageResponse(
+                image.getId(),
+                image.getImageUrl(),
+                image.getSortOrder(),
+                image.isPrimary()
+        );
+    }
+
+    private ProductVariantResponse toVariantResponse(ProductVariant variant) {
+        return new ProductVariantResponse(
+                variant.getId(),
+                variant.getSku(),
+                variant.getSize(),
+                variant.getColor(),
+                variant.label(),
+                variant.effectivePrice(),
+                variant.getStock(),
+                variant.getStatus() == ProductStatus.ACTIVE && variant.getStock() > 0,
+                variant.getStatus().name()
         );
     }
 
@@ -297,6 +349,8 @@ public class ProductService {
         List<Long> productIds = productPage.getContent().stream().map(Product::getId).toList();
         Map<Long, ReviewStats> statsMap = new HashMap<>();
         Map<Long, Boolean> wishlistMap = new HashMap<>();
+        Map<Long, List<ProductImage>> imagesMap = new HashMap<>();
+        Map<Long, List<ProductVariant>> variantsMap = new HashMap<>();
         if (!productIds.isEmpty()) {
             List<Object[]> statsList = productReviewRepository.findStatsForProductIds(productIds);
             for (Object[] row : statsList) {
@@ -304,6 +358,12 @@ public class ProductService {
                 Double avgRating = (Double) row[1];
                 Long revCount = (Long) row[2];
                 statsMap.put(prodId, new ReviewStats(avgRating, revCount));
+            }
+            for (ProductImage image : productImageRepository.findByProductIdInOrderBySortOrderAscIdAsc(productIds)) {
+                imagesMap.computeIfAbsent(image.getProduct().getId(), key -> new ArrayList<>()).add(image);
+            }
+            for (ProductVariant variant : productVariantRepository.findByProductIdInOrderByIdAsc(productIds)) {
+                variantsMap.computeIfAbsent(variant.getProduct().getId(), key -> new ArrayList<>()).add(variant);
             }
             if (userId != null) {
                 List<Long> wishlistedIds = wishlistRepository.findProductIdsByUserIdAndProductIds(userId, productIds);
@@ -315,7 +375,13 @@ public class ProductService {
         Page<ProductResponse> responsePage = productPage.map(product -> {
             ReviewStats stats = statsMap.getOrDefault(product.getId(), new ReviewStats(0.0, 0L));
             boolean isInWishlist = wishlistMap.getOrDefault(product.getId(), false);
-            return toResponse(product, stats.averageRating(), stats.reviewCount(), isInWishlist);
+            return buildResponse(
+                    product,
+                    stats.averageRating(),
+                    stats.reviewCount(),
+                    isInWishlist,
+                    imagesMap.getOrDefault(product.getId(), List.of()),
+                    variantsMap.getOrDefault(product.getId(), List.of()));
         });
         return PageResponse.from(responsePage);
     }
