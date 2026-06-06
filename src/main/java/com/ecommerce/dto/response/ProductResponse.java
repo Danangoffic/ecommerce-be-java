@@ -2,6 +2,7 @@ package com.ecommerce.dto.response;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 public record ProductResponse(
         Long id,
@@ -19,6 +20,9 @@ public record ProductResponse(
         Double averageRating,
         Long reviewCount,
         boolean isInWishlist,
+        boolean hasVariants,
+        List<ProductImageResponse> images,
+        List<ProductVariantResponse> variants,
         Instant createdAt
 ) {
 }

@@ -155,7 +155,7 @@ class EcommerceApplicationTests {
         mockMvc.perform(post("/api/v1/cart/items")
                         .header(HttpHeaders.AUTHORIZATION, bearer(customerToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AddCartItemRequest(productId, 2))))
+                        .content(objectMapper.writeValueAsString(new AddCartItemRequest(productId, null, 2))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].quantity").value(2));
 
@@ -338,7 +338,7 @@ class EcommerceApplicationTests {
         mockMvc.perform(post("/api/v1/cart/items")
                         .header(HttpHeaders.AUTHORIZATION, bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AddCartItemRequest(productId, 1))))
+                        .content(objectMapper.writeValueAsString(new AddCartItemRequest(productId, null, 1))))
                 .andExpect(status().isOk());
 
         String checkoutResponse = mockMvc.perform(post("/api/v1/checkout")

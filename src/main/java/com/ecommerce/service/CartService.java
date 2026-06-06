@@ -7,6 +7,7 @@ import com.ecommerce.dto.response.CartResponse;
 import com.ecommerce.entity.Cart;
 import com.ecommerce.entity.CartItem;
 import com.ecommerce.entity.Product;
+import com.ecommerce.entity.ProductVariant;
 import com.ecommerce.entity.User;
 import com.ecommerce.entity.enums.CartStatus;
 import com.ecommerce.entity.enums.ProductStatus;
@@ -15,6 +16,7 @@ import com.ecommerce.exception.InsufficientStockException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.CartItemRepository;
 import com.ecommerce.repository.CartRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -31,6 +34,7 @@ public class CartService {
     private final CartItemRepository cartItemRepository;
     private final ProductService productService;
     private final UserRepository userRepository;
+    private final ProductVariantRepository productVariantRepository;
 
     public CartResponse getCart(Long userId) {
         return toResponse(getOrCreateDetailedCart(userId));
@@ -40,27 +44,42 @@ public class CartService {
     public CartResponse addItem(Long userId, AddCartItemRequest request) {
         Cart cart = getOrCreateDetailedCart(userId);
         Product product = productService.getManagedProduct(request.productId());
-        validateProductPurchasable(product, request.quantity());
+
+        long variantCount = productVariantRepository.countByProductId(product.getId());
+        ProductVariant variant = null;
+        if (request.variantId() != null) {
+            variant = productVariantRepository.findByIdAndProductId(request.variantId(), product.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Product variant not found"));
+        } else if (variantCount > 0) {
+            throw new BadRequestException("This product requires a variant selection");
+        }
+
+        validatePurchasable(product, variant, request.quantity());
+
+        Long variantId = variant == null ? null : variant.getId();
+        BigDecimal unitPrice = variant != null ? variant.effectivePrice() : product.getPrice();
+        int availableStock = variant != null ? variant.getStock() : product.getStock();
 
         CartItem existingItem = cart.getItems().stream()
-                .filter(item -> item.getProduct().getId().equals(product.getId()))
+                .filter(item -> item.getProduct().getId().equals(product.getId())
+                        && Objects.equals(item.getVariant() == null ? null : item.getVariant().getId(), variantId))
                 .findFirst()
                 .orElse(null);
 
-        int newQuantity = request.quantity();
         if (existingItem != null) {
-            newQuantity += existingItem.getQuantity();
-            if (newQuantity > product.getStock()) {
+            int newQuantity = existingItem.getQuantity() + request.quantity();
+            if (newQuantity > availableStock) {
                 throw new InsufficientStockException("Quantity exceeds available stock");
             }
             existingItem.setQuantity(newQuantity);
-            existingItem.setPriceSnapshot(product.getPrice());
+            existingItem.setPriceSnapshot(unitPrice);
         } else {
             CartItem item = new CartItem();
             item.setCart(cart);
             item.setProduct(product);
+            item.setVariant(variant);
             item.setQuantity(request.quantity());
-            item.setPriceSnapshot(product.getPrice());
+            item.setPriceSnapshot(unitPrice);
             cart.getItems().add(item);
         }
 
@@ -71,9 +90,11 @@ public class CartService {
     public CartResponse updateItem(Long userId, Long itemId, UpdateCartItemRequest request) {
         CartItem item = cartItemRepository.findByIdAndCartUserId(itemId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Cart item not found"));
-        validateProductPurchasable(item.getProduct(), request.quantity());
+        validatePurchasable(item.getProduct(), item.getVariant(), request.quantity());
         item.setQuantity(request.quantity());
-        item.setPriceSnapshot(item.getProduct().getPrice());
+        item.setPriceSnapshot(item.getVariant() != null
+                ? item.getVariant().effectivePrice()
+                : item.getProduct().getPrice());
         cartItemRepository.save(item);
         return getCart(userId);
     }
@@ -128,11 +149,18 @@ public class CartService {
                 });
     }
 
-    private void validateProductPurchasable(Product product, int quantity) {
+    private void validatePurchasable(Product product, ProductVariant variant, int quantity) {
         if (product.getStatus() != ProductStatus.ACTIVE) {
             throw new BadRequestException("Product is inactive");
         }
-        if (quantity > product.getStock()) {
+        if (variant != null) {
+            if (variant.getStatus() != ProductStatus.ACTIVE) {
+                throw new BadRequestException("Variant is inactive");
+            }
+            if (quantity > variant.getStock()) {
+                throw new InsufficientStockException("Quantity exceeds available stock");
+            }
+        } else if (quantity > product.getStock()) {
             throw new InsufficientStockException("Quantity exceeds available stock");
         }
     }
@@ -149,6 +177,8 @@ public class CartService {
                                 item.getId(),
                                 item.getProduct().getId(),
                                 item.getProduct().getName(),
+                                item.getVariant() == null ? null : item.getVariant().getId(),
+                                item.getVariant() == null ? null : item.getVariant().label(),
                                 item.getQuantity(),
                                 item.getPriceSnapshot(),
                                 item.getPriceSnapshot().multiply(BigDecimal.valueOf(item.getQuantity()))

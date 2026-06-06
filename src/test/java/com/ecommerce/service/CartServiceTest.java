@@ -6,6 +6,7 @@ import com.ecommerce.dto.response.CartResponse;
 import com.ecommerce.entity.Cart;
 import com.ecommerce.entity.CartItem;
 import com.ecommerce.entity.Product;
+import com.ecommerce.entity.ProductVariant;
 import com.ecommerce.entity.User;
 import com.ecommerce.entity.enums.CartStatus;
 import com.ecommerce.entity.enums.ProductStatus;
@@ -16,6 +17,7 @@ import com.ecommerce.exception.InsufficientStockException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.CartItemRepository;
 import com.ecommerce.repository.CartRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,9 @@ class CartServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private ProductVariantRepository productVariantRepository;
 
     @InjectMocks
     private CartService cartService;
@@ -108,7 +113,7 @@ class CartServiceTest {
     @Test
     void addItemToCartSuccessfully() {
         // Arrange
-        AddCartItemRequest request = new AddCartItemRequest(1L, 2);
+        AddCartItemRequest request = new AddCartItemRequest(1L, null, 2);
         when(cartRepository.findDetailedByUserIdAndStatus(1L, CartStatus.ACTIVE))
                 .thenReturn(Optional.of(testCart));
         when(productService.getManagedProduct(1L)).thenReturn(testProduct);
@@ -127,7 +132,7 @@ class CartServiceTest {
     void addItemThrowsExceptionWhenProductNotPurchasable() {
         // Arrange
         testProduct.setStatus(ProductStatus.INACTIVE);
-        AddCartItemRequest request = new AddCartItemRequest(1L, 2);
+        AddCartItemRequest request = new AddCartItemRequest(1L, null, 2);
         when(cartRepository.findDetailedByUserIdAndStatus(1L, CartStatus.ACTIVE))
                 .thenReturn(Optional.of(testCart));
         when(productService.getManagedProduct(1L)).thenReturn(testProduct);
@@ -141,10 +146,74 @@ class CartServiceTest {
     void addItemThrowsExceptionWhenInsufficientStock() {
         // Arrange
         testProduct.setStock(1);
-        AddCartItemRequest request = new AddCartItemRequest(1L, 5);
+        AddCartItemRequest request = new AddCartItemRequest(1L, null, 5);
         when(cartRepository.findDetailedByUserIdAndStatus(1L, CartStatus.ACTIVE))
                 .thenReturn(Optional.of(testCart));
         when(productService.getManagedProduct(1L)).thenReturn(testProduct);
+
+        // Act & Assert
+        assertThatThrownBy(() -> cartService.addItem(1L, request))
+                .isInstanceOf(InsufficientStockException.class);
+    }
+
+    @Test
+    void addItemRequiresVariantWhenProductHasVariants() {
+        // Arrange
+        AddCartItemRequest request = new AddCartItemRequest(1L, null, 1);
+        when(cartRepository.findDetailedByUserIdAndStatus(1L, CartStatus.ACTIVE))
+                .thenReturn(Optional.of(testCart));
+        when(productService.getManagedProduct(1L)).thenReturn(testProduct);
+        when(productVariantRepository.countByProductId(1L)).thenReturn(1L);
+
+        // Act & Assert
+        assertThatThrownBy(() -> cartService.addItem(1L, request))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void addItemWithVariantSuccessfully() {
+        // Arrange
+        ProductVariant variant = new ProductVariant();
+        variant.setId(10L);
+        variant.setProduct(testProduct);
+        variant.setSku("SKU-L-RED");
+        variant.setSize("L");
+        variant.setColor("Red");
+        variant.setStock(5);
+        variant.setStatus(ProductStatus.ACTIVE);
+
+        AddCartItemRequest request = new AddCartItemRequest(1L, 10L, 2);
+        when(cartRepository.findDetailedByUserIdAndStatus(1L, CartStatus.ACTIVE))
+                .thenReturn(Optional.of(testCart));
+        when(productService.getManagedProduct(1L)).thenReturn(testProduct);
+        when(productVariantRepository.findByIdAndProductId(10L, 1L)).thenReturn(Optional.of(variant));
+        when(cartRepository.save(any(Cart.class))).thenReturn(testCart);
+
+        // Act
+        CartResponse response = cartService.addItem(1L, request);
+
+        // Assert
+        assertThat(response).isNotNull();
+        assertThat(testCart.getItems()).hasSize(1);
+        assertThat(testCart.getItems().get(0).getVariant()).isEqualTo(variant);
+        verify(productVariantRepository).findByIdAndProductId(10L, 1L);
+    }
+
+    @Test
+    void addItemThrowsExceptionWhenVariantStockInsufficient() {
+        // Arrange
+        ProductVariant variant = new ProductVariant();
+        variant.setId(10L);
+        variant.setProduct(testProduct);
+        variant.setSku("SKU-L-RED");
+        variant.setStock(1);
+        variant.setStatus(ProductStatus.ACTIVE);
+
+        AddCartItemRequest request = new AddCartItemRequest(1L, 10L, 3);
+        when(cartRepository.findDetailedByUserIdAndStatus(1L, CartStatus.ACTIVE))
+                .thenReturn(Optional.of(testCart));
+        when(productService.getManagedProduct(1L)).thenReturn(testProduct);
+        when(productVariantRepository.findByIdAndProductId(10L, 1L)).thenReturn(Optional.of(variant));
 
         // Act & Assert
         assertThatThrownBy(() -> cartService.addItem(1L, request))

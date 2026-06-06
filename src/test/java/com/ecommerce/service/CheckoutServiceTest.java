@@ -16,6 +16,7 @@ import com.ecommerce.exception.BadRequestException;
 import com.ecommerce.exception.InsufficientStockException;
 import com.ecommerce.repository.OrderRepository;
 import com.ecommerce.repository.ProductRepository;
+import com.ecommerce.repository.ProductVariantRepository;
 import com.ecommerce.util.OrderNumberGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,9 @@ class CheckoutServiceTest {
 
     @Mock
     private OrderNumberGenerator orderNumberGenerator;
+
+    @Mock
+    private ProductVariantRepository productVariantRepository;
 
     @InjectMocks
     private CheckoutService checkoutService;
