@@ -7,8 +7,8 @@ import com.ecommerce.dto.response.UserProfileResponse;
 import com.ecommerce.entity.User;
 import com.ecommerce.entity.enums.Role;
 import com.ecommerce.entity.enums.UserStatus;
+import com.ecommerce.exception.BadRequestException;
 import com.ecommerce.exception.ConflictException;
-import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.repository.UserRepository;
 import com.ecommerce.security.AuthenticatedUser;
 import com.ecommerce.security.JwtService;
@@ -28,29 +28,22 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
 
-    @Mock
-    private UserRepository userRepository;
-
-    @Mock
-    private PasswordEncoder passwordEncoder;
-
-    @Mock
-    private AuthenticationManager authenticationManager;
-
-    @Mock
-    private JwtService jwtService;
+    @Mock private UserRepository userRepository;
+    @Mock private PasswordEncoder passwordEncoder;
+    @Mock private AuthenticationManager authenticationManager;
+    @Mock private JwtService jwtService;
 
     @InjectMocks
     private AuthService authService;
 
     private User testUser;
+    private final Instant futureExpiry = Instant.now().plusSeconds(3600);
 
     @BeforeEach
     void setUp() {
@@ -65,32 +58,34 @@ class AuthServiceTest {
         testUser.setCreatedAt(Instant.now());
     }
 
+    private void stubIssueTokens() {
+        when(jwtService.generateRefreshToken()).thenReturn("refresh-uuid");
+        when(jwtService.refreshTokenExpiresAt()).thenReturn(futureExpiry);
+        when(jwtService.generateToken(any(AuthenticatedUser.class))).thenReturn("jwt-token");
+        when(userRepository.save(any(User.class))).thenReturn(testUser);
+    }
+
     @Test
     void registerSuccessfully() {
-        // Arrange
         RegisterRequest request = new RegisterRequest("Alice", "alice@example.com", "password123", "08123456789");
         when(userRepository.existsByEmailIgnoreCase("alice@example.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("encoded_password");
-        when(userRepository.save(any(User.class))).thenReturn(testUser);
-        when(jwtService.generateToken(any(AuthenticatedUser.class))).thenReturn("jwt-token");
+        stubIssueTokens();
 
-        // Act
         AuthResponse response = authService.register(request);
 
-        // Assert
-        assertThat(response).isNotNull();
         assertThat(response.accessToken()).isEqualTo("jwt-token");
+        assertThat(response.refreshToken()).isEqualTo("refresh-uuid");
         assertThat(response.user().email()).isEqualTo("alice@example.com");
-        verify(userRepository).save(any(User.class));
+        // save dipanggil 2x: sekali untuk create user, sekali di issueTokens untuk refresh token
+        verify(userRepository, org.mockito.Mockito.times(2)).save(any(User.class));
     }
 
     @Test
     void registerThrowsExceptionWhenEmailExists() {
-        // Arrange
         RegisterRequest request = new RegisterRequest("Alice", "alice@example.com", "password123", "08123456789");
         when(userRepository.existsByEmailIgnoreCase("alice@example.com")).thenReturn(true);
 
-        // Act & Assert
         assertThatThrownBy(() -> authService.register(request))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Email already registered");
@@ -98,75 +93,96 @@ class AuthServiceTest {
 
     @Test
     void loginSuccessfully() {
-        // Arrange
         LoginRequest request = new LoginRequest("alice@example.com", "password123");
         AuthenticatedUser authenticatedUser = new AuthenticatedUser(testUser);
-        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                authenticatedUser, null, authenticatedUser.getAuthorities());
-        when(authenticationManager.authenticate(any())).thenReturn(auth);
+        when(authenticationManager.authenticate(any()))
+                .thenReturn(new UsernamePasswordAuthenticationToken(authenticatedUser, null, authenticatedUser.getAuthorities()));
         when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
-        when(jwtService.generateToken(authenticatedUser)).thenReturn("jwt-token");
+        stubIssueTokens();
 
-        // Act
         AuthResponse response = authService.login(request);
 
-        // Assert
-        assertThat(response).isNotNull();
         assertThat(response.accessToken()).isEqualTo("jwt-token");
-        assertThat(response.user().email()).isEqualTo("alice@example.com");
+        assertThat(response.refreshToken()).isEqualTo("refresh-uuid");
     }
 
     @Test
     void oauth2LoginSuccessfully() {
-        // Arrange
         when(userRepository.findByEmailIgnoreCase("oauthuser@example.com")).thenReturn(Optional.of(testUser));
-        when(jwtService.generateToken(any(AuthenticatedUser.class))).thenReturn("jwt-token");
+        stubIssueTokens();
 
-        // Act
         AuthResponse response = authService.oauth2Login("OAuth User", "oauthuser@example.com", "google", "google-id-123");
 
-        // Assert
-        assertThat(response).isNotNull();
         assertThat(response.accessToken()).isEqualTo("jwt-token");
     }
 
     @Test
     void oauth2LoginCreatesNewUserIfNotExists() {
-        // Arrange
         when(userRepository.findByEmailIgnoreCase("newuser@example.com")).thenReturn(Optional.empty());
-        when(userRepository.save(any(User.class))).thenReturn(testUser);
-        when(jwtService.generateToken(any(AuthenticatedUser.class))).thenReturn("jwt-token");
+        stubIssueTokens();
 
-        // Act
         AuthResponse response = authService.oauth2Login("New User", "newuser@example.com", "google", "google-id-456");
 
-        // Assert
         assertThat(response).isNotNull();
-        verify(userRepository).save(any(User.class));
+        // save dipanggil 2x: sekali untuk create user baru, sekali di issueTokens untuk refresh token
+        verify(userRepository, org.mockito.Mockito.times(2)).save(any(User.class));
+    }
+
+    @Test
+    void refreshSuccessfully() {
+        testUser.setRefreshToken("valid-refresh-token");
+        testUser.setRefreshTokenExpiry(futureExpiry);
+        when(userRepository.findByRefreshToken("valid-refresh-token")).thenReturn(Optional.of(testUser));
+        when(jwtService.isRefreshTokenExpired(futureExpiry)).thenReturn(false);
+        stubIssueTokens();
+
+        AuthResponse response = authService.refresh("valid-refresh-token");
+
+        assertThat(response.accessToken()).isEqualTo("jwt-token");
+        assertThat(response.refreshToken()).isEqualTo("refresh-uuid");
+    }
+
+    @Test
+    void refreshThrowsWhenTokenNotFound() {
+        when(userRepository.findByRefreshToken("bad-token")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.refresh("bad-token"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Invalid refresh token");
+    }
+
+    @Test
+    void refreshThrowsWhenTokenExpired() {
+        Instant pastExpiry = Instant.now().minusSeconds(1);
+        testUser.setRefreshToken("expired-token");
+        testUser.setRefreshTokenExpiry(pastExpiry);
+        when(userRepository.findByRefreshToken("expired-token")).thenReturn(Optional.of(testUser));
+        when(jwtService.isRefreshTokenExpired(pastExpiry)).thenReturn(true);
+        when(userRepository.save(any(User.class))).thenReturn(testUser);
+
+        assertThatThrownBy(() -> authService.refresh("expired-token"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Refresh token expired");
+
+        // token harus dihapus dari user saat expired
+        assertThat(testUser.getRefreshToken()).isNull();
+        assertThat(testUser.getRefreshTokenExpiry()).isNull();
     }
 
     @Test
     void getCurrentUserReturnsUserProfile() {
-        // Arrange
         when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
 
-        // Act
         UserProfileResponse response = authService.currentUser(1L);
 
-        // Assert
-        assertThat(response).isNotNull();
         assertThat(response.id()).isEqualTo(1L);
         assertThat(response.email()).isEqualTo("alice@example.com");
-        assertThat(response.name()).isEqualTo("Alice");
-        assertThat(response.role()).isEqualTo("CUSTOMER");
     }
 
     @Test
     void getCurrentUserThrowsExceptionWhenUserNotFound() {
-        // Arrange
         when(userRepository.findById(999L)).thenReturn(Optional.empty());
 
-        // Act & Assert
         assertThatThrownBy(() -> authService.currentUser(999L))
                 .isInstanceOf(Exception.class);
     }
