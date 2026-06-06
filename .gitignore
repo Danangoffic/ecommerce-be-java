@@ -32,3 +32,14 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Removed docs ###
+IMPLEMENTATION_COMPLETE.md
+SERVICE_UNIT_TESTS_SUMMARY.md
+UNIT_TESTS_README.md
+TESTING.md
+
+### Build artifacts & IDE caches ###
+.kiro/
+.gradle/
+.commandcode/
