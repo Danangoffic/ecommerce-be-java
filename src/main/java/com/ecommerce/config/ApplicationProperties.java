@@ -8,6 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
+import java.util.List;
 
 @Getter
 @Setter
@@ -18,6 +19,7 @@ public class ApplicationProperties {
     private final Jwt jwt = new Jwt();
     private final Pagination pagination = new Pagination();
     private final Storage storage = new Storage();
+    private List<String> allowedOrigins = List.of("http://localhost:3000");
 
     @Getter
     @Setter
